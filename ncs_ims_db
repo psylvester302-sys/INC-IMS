@@ -1,0 +1,499 @@
+-- ============================================================
+-- NCS-IMS COMPLETE DATABASE
+-- Nekede Computer Science Information & Monitoring System
+-- ============================================================
+
+CREATE DATABASE IF NOT EXISTS ncs_ims_db
+CHARACTER SET utf8mb4
+COLLATE utf8mb4_unicode_ci;
+
+USE ncs_ims_db;
+
+
+-- ============================================================
+-- 1. USERS
+-- ============================================================
+
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    full_name VARCHAR(100) NOT NULL,
+
+    phone_number VARCHAR(30) NOT NULL,
+
+    email VARCHAR(100) NOT NULL UNIQUE,
+
+    password VARCHAR(255) NOT NULL,
+
+    course VARCHAR(100) NOT NULL DEFAULT 'Computer Science',
+
+    current_year INT NOT NULL,
+
+    face_image_path MEDIUMTEXT NOT NULL,
+
+    account_status ENUM(
+        'Active',
+        'Suspended',
+        'Disabled'
+    ) NOT NULL DEFAULT 'Active',
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_users_year (current_year),
+
+    INDEX idx_users_status (account_status)
+);
+
+
+-- ============================================================
+-- 2. ATTENDANCE EVENTS
+-- ============================================================
+--
+-- One event represents one complete attendance exercise.
+--
+-- CLASS:
+--   4 sessions
+--   30 minutes each
+--
+-- EXAM:
+--   2 sessions
+--   60 minutes each
+-- ============================================================
+
+CREATE TABLE attendance_events (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    user_id INT NOT NULL,
+
+    attendance_type ENUM(
+        'class',
+        'exam'
+    ) NOT NULL,
+
+    academic_year INT NOT NULL,
+
+    semester INT NOT NULL,
+
+    identifier VARCHAR(100) NOT NULL,
+
+    required_sessions INT NOT NULL,
+
+    session_duration_minutes INT NOT NULL,
+
+    completed_sessions INT NOT NULL DEFAULT 0,
+
+    completion_status ENUM(
+        'In Progress',
+        'Complete',
+        'Not Complete'
+    ) NOT NULL DEFAULT 'In Progress',
+
+    admin_status ENUM(
+        'Pending',
+        'Approved',
+        'Declined'
+    ) NOT NULL DEFAULT 'Pending',
+
+    admin_note TEXT NULL,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+
+    INDEX idx_event_user (user_id),
+
+    INDEX idx_event_type (attendance_type),
+
+    INDEX idx_event_year_semester (
+        academic_year,
+        semester
+    ),
+
+    INDEX idx_event_status (
+        completion_status,
+        admin_status
+    )
+);
+
+
+-- ============================================================
+-- 3. ATTENDANCE SESSIONS
+-- ============================================================
+--
+-- CLASS:
+--   Session 1
+--   Session 2
+--   Session 3
+--   Session 4
+--
+-- EXAM:
+--   Session 1
+--   Session 2
+--
+-- The server uses these timestamps as the authority.
+-- ============================================================
+
+CREATE TABLE attendance_sessions (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    attendance_event_id INT NOT NULL,
+
+    session_number INT NOT NULL,
+
+    session_type ENUM(
+        'Lecture',
+        'Examination'
+    ) NOT NULL,
+
+    duration_minutes INT NOT NULL,
+
+    started_at DATETIME NULL,
+
+    expires_at DATETIME NULL,
+
+    verification_started_at DATETIME NULL,
+
+    verification_completed_at DATETIME NULL,
+
+    submitted_at DATETIME NULL,
+
+    status ENUM(
+        'Locked',
+        'Available',
+        'Verification Required',
+        'Active',
+        'Completed',
+        'Expired',
+        'Declined'
+    ) NOT NULL DEFAULT 'Locked',
+
+    attendance_result ENUM(
+        'Pending',
+        'Present',
+        'Absent',
+        'Expired'
+    ) NOT NULL DEFAULT 'Pending',
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (attendance_event_id)
+        REFERENCES attendance_events(id)
+        ON DELETE CASCADE,
+
+    UNIQUE KEY unique_event_session (
+        attendance_event_id,
+        session_number
+    ),
+
+    INDEX idx_session_status (status),
+
+    INDEX idx_session_expiry (expires_at)
+);
+
+
+-- ============================================================
+-- 4. FACE VERIFICATION RECORDS
+-- ============================================================
+--
+-- This records every required verification.
+--
+-- Current NCS-IMS implementation uses the simple
+-- 5-second camera verification process.
+--
+-- It does NOT perform biometric matching yet.
+-- ============================================================
+
+CREATE TABLE face_verifications (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    user_id INT NOT NULL,
+
+    attendance_event_id INT NULL,
+
+    attendance_session_id INT NULL,
+
+    verification_type ENUM(
+        'Registration',
+        'Login',
+        'Attendance'
+    ) NOT NULL,
+
+    started_at DATETIME NULL,
+
+    completed_at DATETIME NULL,
+
+    duration_seconds INT NOT NULL DEFAULT 5,
+
+    verification_status ENUM(
+        'Started',
+        'Successful',
+        'Failed',
+        'Cancelled',
+        'Expired'
+    ) NOT NULL DEFAULT 'Started',
+
+    captured_image MEDIUMTEXT NULL,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (attendance_event_id)
+        REFERENCES attendance_events(id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (attendance_session_id)
+        REFERENCES attendance_sessions(id)
+        ON DELETE CASCADE,
+
+    INDEX idx_face_user (user_id),
+
+    INDEX idx_face_event (attendance_event_id),
+
+    INDEX idx_face_session (attendance_session_id),
+
+    INDEX idx_face_status (verification_status)
+);
+
+
+-- ============================================================
+-- 5. LOGIN SESSION RECORDS
+-- ============================================================
+--
+-- Allows the system to keep track of login sessions
+-- and controlled session termination.
+-- ============================================================
+
+CREATE TABLE login_sessions (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    user_id INT NOT NULL,
+
+    session_token VARCHAR(255) NOT NULL UNIQUE,
+
+    attendance_session_id INT NULL,
+
+    login_at DATETIME NOT NULL,
+
+    expires_at DATETIME NULL,
+
+    logout_at DATETIME NULL,
+
+    logout_reason ENUM(
+        'User Logout',
+        'Session Expired',
+        'Attendance Session Expired',
+        'Administrative Logout',
+        'System'
+    ) NULL,
+
+    status ENUM(
+        'Active',
+        'Expired',
+        'Logged Out'
+    ) NOT NULL DEFAULT 'Active',
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (attendance_session_id)
+        REFERENCES attendance_sessions(id)
+        ON DELETE SET NULL,
+
+    INDEX idx_login_user (user_id),
+
+    INDEX idx_login_status (status),
+
+    INDEX idx_login_expiry (expires_at)
+);
+
+
+-- ============================================================
+-- 6. ADMINISTRATIVE DECISIONS
+-- ============================================================
+--
+-- The attendance facts are kept separately from the
+-- administrator's final decision.
+-- ============================================================
+
+CREATE TABLE attendance_admin_decisions (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    attendance_event_id INT NOT NULL,
+
+    admin_user_id INT NULL,
+
+    decision ENUM(
+        'Pending',
+        'Approved',
+        'Declined'
+    ) NOT NULL DEFAULT 'Pending',
+
+    reason TEXT NULL,
+
+    decided_at DATETIME NULL,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (attendance_event_id)
+        REFERENCES attendance_events(id)
+        ON DELETE CASCADE,
+
+    INDEX idx_admin_event (
+        attendance_event_id
+    ),
+
+    INDEX idx_admin_decision (
+        decision
+    )
+);
+
+
+-- ============================================================
+-- 7. ADMIN AUDIT LOG
+-- ============================================================
+--
+-- Keeps a permanent history of important administrative
+-- actions instead of silently overwriting information.
+-- ============================================================
+
+CREATE TABLE admin_audit_logs (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    admin_user_id INT NULL,
+
+    attendance_event_id INT NULL,
+
+    attendance_session_id INT NULL,
+
+    action VARCHAR(100) NOT NULL,
+
+    old_value TEXT NULL,
+
+    new_value TEXT NULL,
+
+    reason TEXT NULL,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (attendance_event_id)
+        REFERENCES attendance_events(id)
+        ON DELETE SET NULL,
+
+    FOREIGN KEY (attendance_session_id)
+        REFERENCES attendance_sessions(id)
+        ON DELETE SET NULL,
+
+    INDEX idx_audit_event (
+        attendance_event_id
+    ),
+
+    INDEX idx_audit_session (
+        attendance_session_id
+    ),
+
+    INDEX idx_audit_action (
+        action
+    ),
+
+    INDEX idx_audit_date (
+        created_at
+    )
+);
+
+
+-- ============================================================
+-- 8. SYSTEM SETTINGS
+-- ============================================================
+--
+-- Allows important timing/control values to be changed
+-- from the Admin Control Center later without rewriting
+-- the application logic.
+-- ============================================================
+
+CREATE TABLE system_settings (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    setting_key VARCHAR(100) NOT NULL UNIQUE,
+
+    setting_value VARCHAR(255) NOT NULL,
+
+    description TEXT NULL,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+);
+
+
+-- ============================================================
+-- 9. DEFAULT SYSTEM SETTINGS
+-- ============================================================
+
+INSERT INTO system_settings
+(
+    setting_key,
+    setting_value,
+    description
+)
+VALUES
+
+(
+    'class_session_duration',
+    '30',
+    'Class attendance session duration in minutes'
+),
+
+(
+    'class_required_sessions',
+    '4',
+    'Number of required class attendance sessions'
+),
+
+(
+    'exam_session_duration',
+    '60',
+    'Examination attendance session duration in minutes'
+),
+
+(
+    'exam_required_sessions',
+    '2',
+    'Number of required examination attendance sessions'
+),
+
+(
+    'face_verification_duration',
+    '5',
+    'Face verification duration in seconds'
+);
+
+
+-- ============================================================
+-- END OF NCS-IMS DATABASE
+-- ============================================================
