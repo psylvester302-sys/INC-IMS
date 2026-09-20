@@ -1,3 +1,5 @@
 db.php
 *.sql
 ncs_ims_database.sql
+ncs_ims_db
+node_modules/
